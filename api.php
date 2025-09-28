@@ -27,9 +27,9 @@ function get_env($key, $default = null) {
 // --- Main Logic ---
 
 // 1. Get API Key
-$apiKey = get_env('MISTRAL_API_KEY');
+$apiKey = get_env('GEMINI_API_KEY');
 if (!$apiKey) {
-    echo json_encode(['reply' => 'Ошибка: API-ключ не найден. Пожалуйста, добавьте его в файл .env с именем MISTRAL_API_KEY.']);
+    echo json_encode(['reply' => 'Ошибка: API-ключ не найден. Пожалуйста, добавьте его в файл .env']);
     exit;
 }
 
@@ -50,33 +50,28 @@ if (!file_exists($knowledgeBasePath)) {
 }
 $knowledgeBase = file_get_contents($knowledgeBasePath);
 
-// 4. Prepare the messages for the AI
-$systemPrompt = "Ты — ИИ-ассистент, специалист по внутренней системе управления складом под названием HUB. Твоя задача — отвечать на вопросы пользователя, основываясь ИСКЛЮЧИТЕЛЬНО на предоставленной базе знаний. Не придумывай ничего от себя. Если ответа в базе знаний нет, вежливо сообщи, что ты можешь отвечать только на вопросы, связанные с системой HUB.\n\nВот база знаний:\n---\n" . $knowledgeBase;
+// 4. Prepare the prompt for the AI
+$prompt = "Ты — ИИ-ассистент, специалист по внутренней системе управления складом под названием HUB. Твоя задача — отвечать на вопросы пользователя, основываясь ИСКЛЮЧИТЕЛЬНО на предоставленной базе знаний. Не придумывай ничего от себя. Если ответа в базе знаний нет, вежливо сообщи, что ты можешь отвечать только на вопросы, связанные с системой HUB.\n\nВот база знаний:\n---\n" . $knowledgeBase . "\n---\n\nВопрос пользователя: \"" . $userMessage . "\"";
 
-// 5. Call the Mistral API
-$url = 'https://api.mistral.ai/v1/chat/completions';
+// 5. Call the Gemini API
+$url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=' . $apiKey;
 
 $data = [
-    'model' => 'mistral-small-latest', // Or another suitable model
-    'messages' => [
+    'contents' => [
         [
-            'role' => 'system',
-            'content' => $systemPrompt
-        ],
-        [
-            'role' => 'user',
-            'content' => $userMessage
+            'parts' => [
+                ['text' => $prompt]
+            ]
         ]
     ]
 ];
 
 $options = [
     'http' => [
-        'header'  => "Content-Type: application/json\n" .
-                     "Authorization: Bearer " . $apiKey . "\n",
+        'header'  => "Content-type: application/json\r\n",
         'method'  => 'POST',
         'content' => json_encode($data),
-        'ignore_errors' => true
+        'ignore_errors' => true // To see the error message from the API
     ]
 ];
 
@@ -86,29 +81,30 @@ $http_response_header = $http_response_header ?? [];
 
 // 6. Process the response
 if ($response === FALSE) {
-    $error = 'Не удалось связаться с API Mistral. ';
+    $error = 'Не удалось связаться с API. ';
+    // Check for more specific errors if possible
     $last_error = error_get_last();
     if ($last_error) {
         $error .= $last_error['message'];
     }
+     // Try to get the HTTP status and response body
     $status_line = $http_response_header[0] ?? 'HTTP/1.1 500 Internal Server Error';
     preg_match('{HTTP/\S+\s(\d+)}', $status_line, $match);
     $status = $match[1] ?? 500;
     
-    error_log("Mistral API Error: Status $status, Response: $response");
+    error_log("Gemini API Error: Status $status, Response: $response");
     
-    echo json_encode(['reply' => "Ошибка при обращении к сервису ИИ (Mistral). Статус: $status. Пожалуйста, проверьте ключ API и настройки сервера."]);
+    echo json_encode(['reply' => "Ошибка при обращении к сервису ИИ. Статус: $status. Пожалуйста, проверьте ключ API и настройки сервера."]);
 
 } else {
     $result = json_decode($response, true);
 
-    if (isset($result['choices'][0]['message']['content'])) {
-        $reply = $result['choices'][0]['message']['content'];
+    if (isset($result['candidates'][0]['content']['parts'][0]['text'])) {
+        $reply = $result['candidates'][0]['content']['parts'][0]['text'];
         echo json_encode(['reply' => $reply]);
     } else {
         // Log the actual error response from the API for debugging
-        error_log("Mistral API - Unexpected response structure: " . $response);
-        $errorMessage = $result['message'] ?? 'Неизвестная ошибка.';
-        echo json_encode(['reply' => 'Получен неожиданный ответ от сервиса ИИ (Mistral). ' . $errorMessage]);
+        error_log("Gemini API - Unexpected response structure: " . $response);
+        echo json_encode(['reply' => 'Получен неожиданный ответ от сервиса ИИ. Возможно, проблема с конфигурацией или ключом API.']);
     }
 }
